@@ -25,6 +25,7 @@
           <textarea id="bytecode_area" rows=50 cols=80>
 push "hello world"
 print
+jmp -2
           </textarea>
         </td>
         <td>
@@ -45,8 +46,32 @@ print
       var ip = 0;
       var sp = -1;
       var code;
+      var sym_cache = new Map();
 
       update_ui();
+
+      function Sym (name) {
+        return {
+          toString: function () {
+            return name;
+          }
+        };
+      }
+
+      function sym(s) {
+        if (!sym_cache.has(s))
+          sym_cache.set(s, Sym(s));
+        return sym_cache.get(s);
+      }
+
+      function atom(x) {
+        if (x[0] === '"')
+          return x.substring(1, x.length-1);
+        else if (!isNaN(x))
+          return Number(x);
+        else
+          return sym(x);
+      }
 
       function read (s) {
         console.log("read()");
@@ -54,15 +79,34 @@ print
         let bytecodes = lines.map(function (line) {
           return line.match(/"[^"]*"|\S+/g);
         });
+        bytecodes = bytecodes.map(function (bytecode) {
+          return bytecode.map(function (elem) {
+            return atom(elem);
+          })
+        });
         return bytecodes;
       }
 
+      // Create syms for comparison in interpret.
+      for (let name of ["push", "print", "jmp"]) {
+        g[name + "_"] = sym(name);
+      }
+
       function interpret (bytecode) {
-        if (bytecode[0] === "push") {
+        if (bytecode[0] === g.push_) {
           g.stack[++sp] = bytecode[1];
+          g.ip += 1;
         }
-        else if (bytecode[0] === "print") {
+        else if (bytecode[0] === g.print_) {
           alert(g.stack[g.sp--]);
+          g.ip += 1;
+        }
+        else if (bytecode[0] === g.jmp_) {
+          let n = bytecode[1];
+          g.ip += n;
+        }
+        else {
+          alert(`I don't know how to: ${bytecode}`);
         }
       }
 
@@ -83,11 +127,11 @@ print
       }
 
       function step_bytecode () {
-        g.code = g.code || read(g.bytecode_area.value);
+        g.code = (g.ip === 0) ? read(g.bytecode_area.value) : g.code;
         g.ip = +g.ip_text.value;
 
         if (g.ip < g.code.length) {
-          interpret(g.code[g.ip++]);
+          interpret(g.code[g.ip]);
           update_ui();
         }
         else {
