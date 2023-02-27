@@ -23,9 +23,11 @@
         <td>
           ip: <input id="ip_text"></input><br>
           <textarea id="bytecode_area" rows=50 cols=80>
-push "hello world"
+push 2
+push 3
+add 2
 print
-jmp -2
+jmp -4
           </textarea>
         </td>
         <td>
@@ -88,9 +90,27 @@ jmp -2
       }
 
       // Create syms for comparison in interpret.
-      for (let name of ["push", "print", "jmp"]) {
+      for (let name of ["push", "print", "jmp", "add", "sub"]) {
         g[name + "_"] = sym(name);
       }
+
+      function binary_op (fn) {
+        return function (bytecode) {
+          let offset = bytecode[1];
+          let beg = g.sp - offset + 1;
+          let end = g.sp + 1;  // coz slice is non-inclusive
+          g.sp -= offset;
+
+          let ret = g.stack.slice(beg, end).reduce(fn);
+          g.stack[++g.sp] = ret;
+          g.ip += 1;
+        };
+      }
+
+      let add_op = binary_op((a, b) => a + b);
+      let sub_op = binary_op((a, b) => a - b);
+      let mul_op = binary_op((a, b) => a * b);
+      let div_op = binary_op((a, b) => a / b);
 
       function interpret (bytecode) {
         if (bytecode[0] === g.push_) {
@@ -104,6 +124,12 @@ jmp -2
         else if (bytecode[0] === g.jmp_) {
           let n = bytecode[1];
           g.ip += n;
+        }
+        else if (bytecode[0] === g.add_) {
+          add_op(bytecode, (a, b) => a + b);
+        }
+        else if (bytecode[0] === g.sub_) {
+          sub_op(bytecode, (a, b) => a - b);
         }
         else {
           alert(`I don't know how to: ${bytecode}`);
