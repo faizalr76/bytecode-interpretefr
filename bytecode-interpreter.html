@@ -4,6 +4,7 @@
       <tr>
         <td align=center>
           Code
+          <input type="button" value="Compile"  onclick="compile()" ></input>
         </td>
         <td align=center>
           Bytecode
@@ -17,7 +18,8 @@
 
       <tr height=100%>
         <td>
-          <textarea rows=50 cols=80>
+          <textarea id="lisp_ui" rows=50 cols=80>
+(> 3 2)
           </textarea>
         </td>
         <td>
@@ -27,7 +29,7 @@ push 2
 push 3
 add 2
 print
-jmp -4
+jmp -9
           </textarea>
         </td>
         <td>
@@ -39,16 +41,68 @@ jmp -4
     </table>
 
     <script>
-      var stack = Array(100);
+      // add sub mul div lt eq jmp jmpt jmpf push load gload store gstore print pop halt
+      // loadd
+      //   offset = code[ip++];
+      //   stack[++sp] = stack[fp+offset];
+
       var g = window;
       var bytecode_area = document.getElementById("bytecode_area");
       var stack_area = document.getElementById("stack_area");
       var ip_text = document.getElementById("ip_text");
       var sp_text = document.getElementById("sp_text");
-      var ip = 0;
-      var sp = -1;
-      var code;
       var sym_cache = new Map();
+
+
+      // code functions //
+
+      var code;
+      var ip = 0;
+
+      var code_ui = document.getElementById("bytecode_area");
+      let ip_ui = document.getElementById("ip_text");
+
+      function code_next () {
+        let ret = code[ip];
+        ip += 1;
+        return ret;
+      }
+
+      function code_jmp (offset) {
+        ip += offset;
+      }
+
+      // stack funtions //
+
+      var stack = Array(100);
+      var sp = -1;
+
+      var stack_ui = document.getElementById("stack_area");
+      var sp_ui = document.getElementById("sp_text");
+
+      function stack_push (x) {
+        sp += 1;
+        stack[sp] = x;
+        // update ui
+      }
+
+      function stack_pop (n) {
+        if (n) {
+          let beg = sp - n + 1;
+          sp -= n;
+          let ret = stack.slice(beg, n);
+          console.log("stack_pop: " + ret);
+          return ret;
+        }
+        else {
+          let ret = stack[sp];
+          sp -= 1;
+          // update ui
+          return ret;
+        }
+      }
+
+      // end stack functions //
 
       update_ui();
 
@@ -75,61 +129,157 @@ jmp -4
           return sym(x);
       }
 
-      function read (s) {
-        console.log("read()");
-        let lines = s.trim().split("\n");
-        let bytecodes = lines.map(function (line) {
-          return line.match(/"[^"]*"|\S+/g);
-        });
-        bytecodes = bytecodes.map(function (bytecode) {
-          return bytecode.map(function (elem) {
-            return atom(elem);
-          })
-        });
-        return bytecodes;
-      }
+      // Create syms for comparison in parse and interpret.
 
-      // Create syms for comparison in interpret.
-      for (let name of ["push", "print", "jmp", "add", "sub"]) {
+      for (let name of ["quote", "do", "push", "print", "jmp", "add", "sub", "gt", "lt"]) {
         g[name + "_"] = sym(name);
       }
 
-      function binary_op (fn) {
-        return function (bytecode) {
-          let offset = bytecode[1];
-          let beg = g.sp - offset + 1;
-          let end = g.sp + 1;  // coz slice is non-inclusive
-          g.sp -= offset;
-
-          let ret = g.stack.slice(beg, end).reduce(fn);
-          g.stack[++g.sp] = ret;
-          g.ip += 1;
-        };
+      function lex (s) {
+        return s.match(/,@|[()'`,]|"[^"]*"|[^ \t\n()]+/g);
       }
 
-      let add_op = binary_op((a, b) => a + b);
-      let sub_op = binary_op((a, b) => a - b);
-      let mul_op = binary_op((a, b) => a * b);
-      let div_op = binary_op((a, b) => a / b);
+      function is_num (x) {
+        return !isNaN(x);
+      }
 
-      function interpret (bytecode) {
-        if (bytecode[0] === g.push_) {
-          g.stack[++sp] = bytecode[1];
-          g.ip += 1;
+      function parse (tokens) {
+        let ret = [do_];
+        while (tokens.length) {
+          ret.push(parse1(tokens));
         }
-        else if (bytecode[0] === g.print_) {
-          alert(g.stack[g.sp--]);
-          g.ip += 1;
+
+        if (ret.length === 2) {
+          return ret[1];
         }
-        else if (bytecode[0] === g.jmp_) {
-          let n = bytecode[1];
-          g.ip += n;
+        else {
+          return ret;
         }
-        else if (bytecode[0] === g.add_) {
-          add_op(bytecode, (a, b) => a + b);
+      }
+
+      function parse1 (tokens) {
+        let tok = tokens.shift();
+        if (tok === '(') {
+          let ret = [];
+          while (true) {
+            if (tokens.length === 0) {
+              throw("Expected clsoing-paren not EOF !");
+            }
+            else if (tokens[0] === ')') {
+              tokens.shift();
+              return ret;
+            }
+            else {
+              ret.push(parse1(tokens));
+            }  
+          }   // end-while
+        }    
+        else if (tok === ')') {
+          throw("Unexpected closing-paren !");
         }
-        else if (bytecode[0] === g.sub_) {
-          sub_op(bytecode, (a, b) => a - b);
+        else if (tok === "'") {
+          let ret = [quote_, parse1(tokens)];
+          return ret;
+        }
+        else if (is_num(tok)) {
+          return Number(tok);
+        }
+        else if (tok[0] === '"') {
+          return tok.substring(1, tok.length);
+        }
+        else { 
+          return sym(tok); 
+        }
+      }  // end-fun
+
+      function read (s) {
+        let arr = lex(s);
+        bytecodes = arr.map(function (elem) {
+          return atom(elem);
+        });
+        console.log("read(): " + bytecodes);
+        return bytecodes;
+      } // end parse1
+
+      // compile //
+
+      env = new Map();
+      env.set(sym("+"), add_);
+      env.set(sym("-"), sub_);
+      env.set(sym(">"), gt_);
+      env.set(sym("<"), lt_);
+
+      function kompile (x) {
+        if (Array.isArray(x)) {
+          //if (x[0] === sym("+")) {
+          if (env.has(x[0])) {
+            for (let i = 1; i < x.length; i++) {
+              kompile(x[i]);
+            }
+            code.push(env.get(x[0]));
+            code.push(x.length - 1);
+          }
+        }
+        else {
+          code.push(push_);
+          code.push(x);
+        }
+      }
+
+      function compile () {
+        console.log("compiling..");
+        let s = lisp_ui.value;
+
+        Array.prototype.toString = function () { return this.join(","); };
+        let tokens = lex(s);
+        console.log("tokens: " + tokens);
+
+        Array.prototype.toString = function () { return "(" + this.join(" ") + ")"; };
+        let ast = parse(tokens);
+        console.log("ast: " + ast);
+
+        code = [];
+        kompile(ast);
+        console.log("code: " + code);
+        code_ui.value = code.join("\n");
+
+      }
+
+      let add_op = (a, b) => a + b;
+      let sub_op = (a, b) => a - b;
+      let mul_op = (a, b) => a * b;
+      let div_op = (a, b) => a / b;
+      let gt_op  = (a, b) => a > b;
+      let lt_op  = (a, b) => a < b;
+
+      function interpret () {
+        let bytecode = code_next();
+        if (bytecode === g.push_) {
+          stack_push(code_next());
+        }
+        else if (bytecode === g.print_) {
+          alert(stack_pop());
+        }
+        else if (bytecode === g.jmp_) {
+          let offset = code_next();
+          code_jmp(offset);
+          //let n = bytecode[1];
+          //g.ip += n;
+        }
+        else if (bytecode === g.add_) {
+          let argc = code_next();   
+          let ret = stack_pop(argc).reduce(add_op);
+          stack_push(ret);
+        }
+        else if (bytecode === g.sub_) {
+          let argc = code_next();   
+          let ret = stack_pop(argc).reduce(sub_op);
+          stack_push(ret);
+        }
+        else if (bytecode === g.gt_) {
+          let argc = code_next();   
+          let ret = stack_pop(argc).reduce(gt_op);
+          stack_push(ret);
         }
         else {
           alert(`I don't know how to: ${bytecode}`);
@@ -137,9 +287,9 @@ jmp -4
       }
 
       function update_ui () {
-        g.ip_text.value = g.ip;
-        g.sp_text.value = g.sp;
-        g.stack_area.value = g.stack.slice(0, g.sp+1).join("\n");
+        ip_ui.value = ip;
+        sp_ui.value = sp;
+        stack_ui.value = stack.slice(0, sp + 1).join("\n");
       }
 
       function run_bytecode () {
@@ -154,10 +304,10 @@ jmp -4
 
       function step_bytecode () {
         g.code = (g.ip === 0) ? read(g.bytecode_area.value) : g.code;
-        g.ip = +g.ip_text.value;
+        //g.ip = +g.ip_text.value;
 
         if (g.ip < g.code.length) {
-          interpret(g.code[g.ip]);
+          interpret();
           update_ui();
         }
         else {
